@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image edge detection tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .image-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .image-box {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-upload,
+        .detect-btn {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .file-upload:hover,
+        .detect-btn:hover {
+            background-color: #45a049;
+        }
+
+        .loading {
+            display: none;
+            margin: 10px 0;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Image edge detection tool</h1>
+
+        <div class="control-panel">
+            <label class="file-upload">
+                Select pictures
+                <input type="file" id="imageInput" accept="image/*">
+            </label>
+
+            <button id="detectBtn" class="detect-btn">Edge detection</button>
+        </div>
+
+        <div class="loading" id="loadingIndicator">
+            Processing, please wait....
+        </div>
+
+        <div class="image-container">
+            <div class="image-box">
+                <h3>Original picture</h3>
+                <canvas id="originalCanvas"></canvas>
+            </div>
+
+            <div class="image-box">
+                <h3>Edge detection results</h3>
+                <canvas id="edgeCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const detectBtn = document.getElementById('detectBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const originalCanvas = document.getElementById('originalCanvas');
+        const edgeCanvas = document.getElementById('edgeCanvas');
+
+        let originalImage = null;
+
+        imageInput.addEventListener('change', function (e) {
+            if (e.target.files && e.target.files[0]) {
+                const reader = new FileReader();
+
+                reader.onload = function (event) {
+                    originalImage = new Image();
+                    originalImage.onload = function () {
+                        displayOriginalImage();
+                        edgeCanvas.width = originalImage.width;
+                        edgeCanvas.height = originalImage.height;
+                        const ctx = edgeCanvas.getContext('2d');
+                        ctx.clearRect(0, 0, edgeCanvas.width, edgeCanvas.height);
+                    };
+                    originalImage.src = event.target.result;
+                };
+
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        });
+
+        function displayOriginalImage() {
+            const ctx = originalCanvas.getContext('2d');
+            originalCanvas.width = originalImage.width;
+            originalCanvas.height = originalImage.height;
+            ctx.drawImage(originalImage, 0, 0);
+        }
+
+        detectBtn.addEventListener('click', function () {
+            if (!originalImage) {
+                alert('Please upload the picture first.');
+                return;
+            }
+
+            loadingIndicator.style.display = 'block';
+
+            setTimeout(() => {
+                try {
+                    const ctx = originalCanvas.getContext('2d');
+                    const edgeCtx = edgeCanvas.getContext('2d');
+                    edgeCanvas.width = originalImage.width;
+                    edgeCanvas.height = originalImage.height;
+
+                    const imageData = ctx.getImageData(0, 0, originalCanvas.width, originalCanvas.height);
+                    const data = imageData.data;
+
+                    const edgeData = detectEdges(data, originalCanvas.width, originalCanvas.height);
+
+                    edgeCtx.fillStyle = '#FF0000';
+                    for (let i = 0; i < edgeData.length; i++) {
+                        if (edgeData[i] > 0) {
+                            const x = i % originalCanvas.width;
+                            const y = Math.floor(i / originalCanvas.width);
+                            edgeCtx.fillRect(x, y, 1, 1);
+                        }
+                    }
+
+                    loadingIndicator.style.display = 'none';
+                } catch (error) {
+                    console.error('Edge detection failed:', error);
+                    loadingIndicator.style.display = 'none';
+                    alert('An error occurred during edge detection: ' + error.message);
+                }
+            }, 100);
+        });
+
+        function detectEdges(data, width, height) {
+            const edgeData = new Uint8Array(width * height);
+            const threshold = 30;
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = (y * width + x) * 4;
+
+                    let gx = 0, gy = 0;
+
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nIdx = ((y + dy) * width + (x + dx)) * 4;
+                            const gray = 0.299 * data[nIdx] + 0.587 * data[nIdx + 1] + 0.114 * data[nIdx + 2];
+
+                            if (dx === -1) {
+                                if (dy === -1) { gx += -gray; gy += -gray; }
+                                else if (dy === 0) gx += -2 * gray;
+                                else if (dy === 1) { gx += -gray; gy += gray; }
+                            } else if (dx === 0) {
+                                if (dy === -1) gy += -2 * gray;
+                                else if (dy === 1) gy += 2 * gray;
+                            } else if (dx === 1) {
+                                if (dy === -1) { gx += gray; gy += -gray; }
+                                else if (dy === 0) gx += 2 * gray;
+                                else if (dy === 1) { gx += gray; gy += gray; }
+                            }
+                        }
+                    }
+
+                    const magnitude = Math.sqrt(gx * gx + gy * gy);
+                    if (magnitude > threshold) {
+                        edgeData[y * width + x] = 255;
+                    }
+                }
+            }
+
+            return edgeData;
+        }
+    </script>
+</body>
+
+</html>

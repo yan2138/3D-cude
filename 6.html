@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image retouching tool</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .app-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 1200px;
+        }
+
+        h2 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .canvas-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            background-color: #fff;
+            max-width: 100%;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        button, select {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .tool-options {
+            margin-top: 10px;
+            display: none;
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .active {
+            display: block;
+        }
+
+        input[type="range"] {
+            width: 200px;
+            margin: 0 10px;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: #666;
+            text-align: center;
+        }
+
+        
+        .selection-overlay {
+            position: absolute;
+            background: rgba(0, 100, 255, 0.2);
+            border: 2px dashed #0064ff;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <h2>Image retouching tools</h2>
+        
+        <div class="controls">
+            <button id="loadBtn">Load sample images</button>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+            <button id="uploadBtn">Upload pictures</button>
+            <select id="retouchTool">
+                <option value="none">Select tools</option>
+                <option value="rectSelect">Rectangular selection</option>
+                <option value="brightness">Brightness adjustment</option>
+                <option value="contrast">Contrast adjustment</option>
+                <option value="blur">Fuzzy processing</option>
+                <option value="clone">Clone Stamp</option>
+                <option value="heal">Fix the paintbrush</option>
+            </select>
+            <div id="toolOptions" class="tool-options">
+                <span id="optionLabel">intensity:</span>
+                <input type="range" id="effectIntensity" min="1" max="100" value="50">
+                <span id="intensityValue">50</span>
+                <button id="applyToSelectionBtn" disabled>Apply only to the selection</button>
+                <button id="clearSelectionBtn" disabled>Clear selection</button>
+            </div>
+            <button id="applyBtn" disabled>Application effect</button>
+            <button id="undoBtn" disabled>Cancel</button>
+            <button id="saveBtn" disabled>Save the picture</button>
+        </div>
+        
+        <div class="canvas-container">
+            <div style="position: relative;">
+                <p>Original picture</p>
+                <canvas id="originalCanvas" width="800" height="600"></canvas>
+                <div id="selectionOverlay" class="selection-overlay"></div>
+            </div>
+            <div>
+                <p>After processing</p>
+                <canvas id="resultCanvas" width="800" height="600"></canvas>
+            </div>
+        </div>
+        
+        <div class="status" id="statusMessage"></div>
+    </div>
+
+    <script>
+        
+        const originalCanvas = document.getElementById('originalCanvas');
+        const resultCanvas = document.getElementById('resultCanvas');
+        const ctxOrig = originalCanvas.getContext('2d');
+        const ctxRes = resultCanvas.getContext('2d');
+        const loadBtn = document.getElementById('loadBtn');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fileInput = document.getElementById('fileInput');
+        const retouchTool = document.getElementById('retouchTool');
+        const toolOptions = document.getElementById('toolOptions');
+        const effectIntensity = document.getElementById('effectIntensity');
+        const intensityValue = document.getElementById('intensityValue');
+        const applyBtn = document.getElementById('applyBtn');
+        const undoBtn = document.getElementById('undoBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const statusMessage = document.getElementById('statusMessage');
+        const applyToSelectionBtn = document.getElementById('applyToSelectionBtn');
+        const clearSelectionBtn = document.getElementById('clearSelectionBtn');
+        const selectionOverlay = document.getElementById('selectionOverlay');
+
+        
+        let originalImage = null;
+        let currentImage = null;
+        let history = [];
+        let maxHistorySteps = 10;
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentTool = 'none';
+        let cloneSource = null;
+        let selection = null; 
+        let isSelecting = false;
+        let selectStartX = 0;
+        let selectStartY = 0;
+
+       
+        function handleError(message) {
+            console.error(message);
+            showStatus(`error: ${message}`);
+        }
+
+        
+        loadBtn.addEventListener('click', () => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = 'https://picsum.photos/800/600';
+            img.onload = () => {
+                loadImage(img);
+                showStatus('The sample pictures have been loaded');
+            };
+            img.onerror = () => handleError('无Failed to load sample images. Please check your network connection.');
+        });
+
+        
+        uploadBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        loadImage(img);
+                        showStatus('The picture has been uploaded.');
+                    };
+                    img.onerror = () => handleError('Unable to load the uploaded image');
+                };
+                reader.onerror = () => handleError('File reading failed');
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        });
+
+        
+        function loadImage(img) {
+            try {
+                
+                originalCanvas.width = img.width;
+                originalCanvas.height = img.height;
+                resultCanvas.width = img.width;
+                resultCanvas.height = img.height;
+
+                
+                originalImage = new Image();
+                originalImage.src = img.src;
+                originalImage.onload = () => {
+                    
+                    ctxOrig.drawImage(originalImage, 0, 0);
+                    
+                    
+                    ctxRes.drawImage(originalImage, 0, 0);
+                    currentImage = getImageDataFromCanvas(resultCanvas);
+                    
+                    
+                    history = [];
+                    selection = null;
+                    updateSelectionOverlay();
+                    
+                    
+                    addToHistory();
+                    
+                    
+                    applyBtn.disabled = false;
+                    saveBtn.disabled = false;
+                    undoBtn.disabled = history.length <= 1;
+                    
+                    showStatus('The picture has been loaded successfully. Please select a tool for editing.');
+                };
+            } catch (e) {
+                handleError(`Failed to load the image: ${e.message}`);
+            }
+        }
+
+        
+        retouchTool.addEventListener('change', () => {
+            currentTool = retouchTool.value;
+            
+            
+            isDrawing = false;
+            isSelecting = false;
+            
+            
+            if (currentTool === 'none') {
+                toolOptions.classList.remove('active');
+                applyBtn.disabled = true;
+                applyToSelectionBtn.disabled = true;
+                clearSelectionBtn.disabled = true;
+            } else {
+                toolOptions.classList.add('active');
+                applyBtn.disabled = false;
+                applyToSelectionBtn.disabled = !selection;
+                clearSelectionBtn.disabled = !selection;
+                
+                
+                switch (currentTool) {
+                    case 'rectSelect':
+                        document.getElementById('optionLabel').textContent = 'Selection tool';
+                        applyBtn.disabled = true;
+                        applyToSelectionBtn.disabled = !selection;
+                        clearSelectionBtn.disabled = !selection;
+                        break;
+                    case 'brightness':
+                    case 'contrast':
+                    case 'blur':
+                        document.getElementById('optionLabel').textContent = 'intensity:';
+                        effectIntensity.value = 50;
+                        break;
+                    case 'clone':
+                    case 'heal':
+                        document.getElementById('optionLabel').textContent = 'Brush size:';
+                        effectIntensity.value = 20;
+                        break;
+                }
+                intensityValue.textContent = effectIntensity.value;
+            }
+            
+            
+            setupCanvasInteraction();
+        });
+
+       
+        effectIntensity.addEventListener('input', () => {
+            intensityValue.textContent = effectIntensity.value;
+        });
+
+        
+        applyBtn.addEventListener('click', () => {
+            if (!currentImage || currentTool === 'none' || currentTool === 'rectSelect') return;
+            
+            try {
+               
+                addToHistory();
+                
+               
+                switch (currentTool) {
+                    case 'brightness':
+                        applyBrightness(parseInt(effectIntensity.value));
+                        break;
+                    case 'contrast':
+                        applyContrast(parseInt(effectIntensity.value));
+                        break;
+                    case 'blur':
+                        applyBlur(parseInt(effectIntensity.value));
+                        break;
+                    default:
+                        showStatus('Unknown tool. Please select another tool.');
+                }
+                
+                
+                undoBtn.disabled = history.length <= 1;
+                
+                showStatus(`${retouchTool.options[retouchTool.selectedIndex].text} The effect has been applied`);
+            } catch (e) {
+                handleError(`The application effect failed: ${e.message}`);
+            }
+        });
+
+       
+        applyToSelectionBtn.addEventListener('click', () => {
+            if (!currentImage || !selection || currentTool === 'none' || currentTool === 'rectSelect') return;
+            
+            try {
+               
+                addToHistory();
+                
+               
+                switch (currentTool) {
+                    case 'brightness':
+                        applyBrightnessToSelection(parseInt(effectIntensity.value));
+                        break;
+                    case 'contrast':
+                        applyContrastToSelection(parseInt(effectIntensity.value));
+                        break;
+                    case 'blur':
+                        applyBlurToSelection(parseInt(effectIntensity.value));
+                        break;
+                    default:
+                        showStatus('This tool does not support application to the selected area. Please choose another tool.');
+                }
+                
+                
+                undoBtn.disabled = history.length <= 1;
+                
+                showStatus(`${retouchTool.options[retouchTool.selectedIndex].text} The effect has been applied to the selection.`);
+            } catch (e) {
+                handleError(`Failed to apply the effect to the selection: ${e.message}`);
+            }
+        });
+
+        
+        clearSelectionBtn.addEventListener('click', () => {
+            selection = null;
+            updateSelectionOverlay();
+            applyToSelectionBtn.disabled = true;
+            clearSelectionBtn.disabled = true;
+            showStatus('The selection has been cleared');
+        });
+
+        
+        undoBtn.addEventListener('click', () => {
+            if (history.length <= 1) return;
+            
+            try {
+               
+                history.pop(); 
+                const prevState = history[history.length - 1];
+                ctxRes.putImageData(prevState, 0, 0);
+                currentImage = prevState;
+                
+                
+                undoBtn.disabled = history.length <= 1;
+                
+                showStatus('The operation has been revoked');
+            } catch (e) {
+                handleError(`The revocation failed: ${e.message}`);
+            }
+        });
+
+        
+        saveBtn.addEventListener('click', () => {
+            if (!currentImage) return;
+            
+            try {
+                const link = document.createElement('a');
+                link.download = 'retouched-image.png';
+                link.href = resultCanvas.toDataURL('image/png');
+                link.click();
+                
+                showStatus('The picture has been saved.');
+            } catch (e) {
+                handleError(`Failed to save the picture: ${e.message}`);
+            }
+        });
+
+        
+        function setupCanvasInteraction() {
+            
+            originalCanvas.removeEventListener('mousedown', startDrawing);
+            originalCanvas.removeEventListener('mousemove', draw);
+            originalCanvas.removeEventListener('mouseup', stopDrawing);
+            originalCanvas.removeEventListener('mouseout', stopDrawing);
+            originalCanvas.removeEventListener('mousedown', startSelecting);
+            originalCanvas.removeEventListener('mousemove', updateSelection);
+            originalCanvas.removeEventListener('mouseup', finishSelection);
+            
+            
+            if (currentTool === 'rectSelect') {
+                originalCanvas.addEventListener('mousedown', startSelecting);
+                originalCanvas.addEventListener('mousemove', updateSelection);
+                originalCanvas.addEventListener('mouseup', finishSelection);
+            } else if (currentTool === 'clone' || currentTool === 'heal') {
+                originalCanvas.addEventListener('mousedown', startDrawing);
+                originalCanvas.addEventListener('mousemove', draw);
+                originalCanvas.addEventListener('mouseup', stopDrawing);
+                originalCanvas.addEventListener('mouseout', stopDrawing);
+            }
+        }
+
+        
+        function startSelecting(e) {
+            isSelecting = true;
+            const rect = originalCanvas.getBoundingClientRect();
+            selectStartX = e.clientX - rect.left;
+            selectStartY = e.clientY - rect.top;
+            selection = {
+                x: selectStartX,
+                y: selectStartY,
+                width: 0,
+                height: 0
+            };
+            updateSelectionOverlay();
+        }
+
+        
+        function updateSelection(e) {
+            if (!isSelecting) return;
+            
+            const rect = originalCanvas.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+            
+           
+            selection.x = Math.min(selectStartX, currentX);
+            selection.y = Math.min(selectStartY, currentY);
+            selection.width = Math.abs(currentX - selectStartX);
+            selection.height = Math.abs(currentY - selectStartY);
+            
+            updateSelectionOverlay();
+        }
+
+        
+        function finishSelection() {
+            isSelecting = false;
+            
+            
+            if (selection && selection.width > 0 && selection.height > 0) {
+                applyToSelectionBtn.disabled = false;
+                clearSelectionBtn.disabled = false;
+                showStatus('The selection has been created. Effects can be applied to the selection.');
+            } else {
+                selection = null;
+                updateSelectionOverlay();
+                showStatus('The selected area is invalid. Please select again.');
+            }
+        }
+
+       
+        function updateSelectionOverlay() {
+            if (selection) {
+                const rect = originalCanvas.getBoundingClientRect();
+                selectionOverlay.style.left = `${rect.left + selection.x}px`;
+                selectionOverlay.style.top = `${rect.top + selection.y}px`;
+                selectionOverlay.style.width = `${selection.width}px`;
+                selectionOverlay.style.height = `${selection.height}px`;
+                selectionOverlay.style.display = 'block';
+            } else {
+                selectionOverlay.style.display = 'none';
+            }
+        }
+
+        
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = originalCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (currentTool === 'clone') {
+                
+                if (!cloneSource) {
+                    cloneSource = { x, y };
+                    showStatus('The cloning origin point has been set. Start smearing to copy.');
+                } else {
+                    
+                    addToHistory();
+                    [lastX, lastY] = [x, y];
+                }
+            } else {
+                
+                addToHistory();
+                [lastX, lastY] = [x, y];
+            }
+        }
+
+        
+        function draw(e) {
+            if (!isDrawing) return;
+            
+            try {
+                const rect = originalCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const brushSize = parseInt(effectIntensity.value);
+                
+                if (currentTool === 'clone' && cloneSource) {
+                   
+                    cloneArea(cloneSource.x, cloneSource.y, x, y, brushSize);
+                    
+                    
+                    cloneSource.x += x - lastX;
+                    cloneSource.y += y - lastY;
+                } else if (currentTool === 'heal') {
+                    
+                    
+                    blurArea(x, y, brushSize);
+                }
+                
+                [lastX, lastY] = [x, y];
+                
+                
+                undoBtn.disabled = history.length <= 1;
+            } catch (e) {
+                handleError(`Drawing failed: ${e.message}`);
+                isDrawing = false;
+            }
+        }
+
+        
+        function stopDrawing() {
+            isDrawing = false;
+            if (currentTool === 'clone') {
+                
+                cloneSource = null;
+            }
+        }
+
+        
+        function applyBrightness(intensity) {
+            try {
+                const imageData = getImageDataFromCanvas(resultCanvas);
+                const data = imageData.data;
+                const factor = intensity - 50;
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = Math.max(0, Math.min(255, data[i] + factor));     // R
+                    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + factor)); // G
+                    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + factor)); // B
+                }
+                
+                ctxRes.putImageData(imageData, 0, 0);
+                currentImage = imageData;
+            } catch (e) {
+                handleError(`The brightness adjustment failed: ${e.message}`);
+            }
+        }
+
+        
+        function applyBrightnessToSelection(intensity) {
+            try {
+                if (!selection) return;
+                
+                const imageData = getImageDataFromCanvas(resultCanvas);
+                const data = imageData.data;
+                const factor = intensity - 50;
+                const width = imageData.width;
+                
+                
+                for (let y = selection.y; y < selection.y + selection.height; y++) {
+                    for (let x = selection.x; x < selection.x + selection.width; x++) {
+                        const index = (y * width + x) * 4;
+                        if (index < data.length) {
+                            data[index] = Math.max(0, Math.min(255, data[index] + factor));     // R
+                            data[index + 1] = Math.max(0, Math.min(255, data[index + 1] + factor)); // G
+                            data[index + 2] = Math.max(0, Math.min(255, data[index + 2] + factor)); // B
+                        }
+                    }
+                }
+                
+                ctxRes.putImageData(imageData, 0, 0);
+                currentImage = imageData;
+            } catch (e) {
+                handleError(`Failed to adjust the brightness to the selection area: ${e.message}`);
+            }
+        }
+
+        
+        function applyContrast(intensity) {
+            try {
+                const imageData = getImageDataFromCanvas(resultCanvas);
+                const data = imageData.data;
+                const factor = (259 * (intensity + 255)) / (255 * (259 - intensity));
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = Math.max(0, Math.min(255, factor * (data[i] - 128) + 128));     
+                    data[i + 1] = Math.max(0, Math.min(255, factor * (data[i + 1] - 128) + 128)); 
+                    data[i + 2] = Math.max(0, Math.min(255, factor * (data[i + 2] - 128) + 128)); 
+                }
+                
+                ctxRes.putImageData(imageData, 0, 0);
+                currentImage = imageData;
+            } catch (e) {
+                handleError(`Contrast adjustment failed: ${e.message}`);
+            }
+        }
+
+        
+        function applyContrastToSelection(intensity) {
+            try {
+                if (!selection) return;
+                
+                const imageData = getImageDataFromCanvas(resultCanvas);
+                const data = imageData.data;
+                const factor = (259 * (intensity + 255)) / (255 * (259 - intensity));
+                const width = imageData.width;
+                
+                
+                for (let y = selection.y; y < selection.y + selection.height; y++) {
+                    for (let x = selection.x; x < selection.x + selection.width; x++) {
+                        const index = (y * width + x) * 4;
+                        if (index < data.length) {
+                            data[index] = Math.max(0, Math.min(255, factor * (data[index] - 128) + 128));     
+                            data[index + 1] = Math.max(0, Math.min(255, factor * (data[index + 1] - 128) + 128)); 
+                            data[index + 2] = Math.max(0, Math.min(255, factor * (data[index + 2] - 128) + 128)); 
+                        }
+                    }
+                }
+                
+                ctxRes.putImageData(imageData, 0, 0);
+                currentImage = imageData;
+            } catch (e) {
+                handleError(`Failed to adjust the contrast to the selection: ${e.message}`);
+            }
+        }
+
+        
+        function applyBlur(radius) {
+            try {
+                
+                resultCanvas.style.filter = `blur(${radius / 10}px)`;
+                
+               
+                
+            } catch (e) {
+                handleError(`The blurring process failed: ${e.message}`);
+            }
+        }
+
+        
+        function applyBlurToSelection(radius) {
+            try {
+                if (!selection) return;
+                
+                
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = selection.width;
+                tempCanvas.height = selection.height;
+                
+                
+                tempCtx.drawImage(resultCanvas, selection.x, selection.y, selection.width, selection.height, 0, 0, selection.width, selection.height);
+                
+                
+                tempCanvas.style.filter = `blur(${radius / 10}px)`;
+                
+                
+                ctxRes.drawImage(tempCanvas, 0, 0, selection.width, selection.height, selection.x, selection.y, selection.width, selection.height);
+                
+                
+                currentImage = getImageDataFromCanvas(resultCanvas);
+            } catch (e) {
+                handleError(`Failed to blur the selected area: ${e.message}`);
+            }
+        }
+
+        
+        function cloneArea(sourceX, sourceY, destX, destY, size) {
+            try {
+               
+                const sourceData = ctxOrig.getImageData(sourceX - size/2, sourceY - size/2, size, size);
+                ctxRes.putImageData(sourceData, destX - size/2, destY - size/2);
+                currentImage = getImageDataFromCanvas(resultCanvas);
+            } catch (e) {
+                handleError(`Cloning failed: ${e.message}`);
+            }
+        }
+
+        
+        function blurArea(x, y, size) {
+            try {
+                
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = size;
+                tempCanvas.height = size;
+                
+                
+                tempCtx.drawImage(resultCanvas, x - size/2, y - size/2, size, size, 0, 0, size, size);
+                
+                
+                tempCanvas.style.filter = 'blur(3px)';
+                
+                
+                ctxRes.drawImage(tempCanvas, 0, 0, size, size, x - size/2, y - size/2, size, size);
+                currentImage = getImageDataFromCanvas(resultCanvas);
+            } catch (e) {
+                handleError(`Repair failed: ${e.message}`);
+            }
+        }
+
+        
+        function getImageDataFromCanvas(canvas) {
+            try {
+                return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+            } catch (e) {
+                handleError(`Failed to obtain image data: ${e.message}`);
+                return null;
+            }
+        }
+
+        
+        function addToHistory() {
+            if (!currentImage) return;
+            
+            try {
+                
+                if (history.length >= maxHistorySteps) {
+                    history.shift(); 
+                }
+                
+                
+                const imgData = getImageDataFromCanvas(resultCanvas);
+                history.push(imgData);
+            } catch (e) {
+                handleError(`Failed to save historical records: ${e.message}`);
+            }
+        }
+
+        
+        function showStatus(message) {
+            statusMessage.textContent = message;
+            setTimeout(() => {
+                statusMessage.textContent = '';
+            }, 3000);
+        }
+
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            showStatus('Please load or upload an image to start editing.');
+        });
+
+        
+        window.addEventListener('resize', updateSelectionOverlay);
+    </script>
+</body>
+</html>
+    

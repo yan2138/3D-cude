@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spline Interpolation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        canvas {
+            border: 1px solid #000;
+            margin-bottom: 10px;
+        }
+        .controls {
+            margin-bottom: 15px;
+        }
+        button {
+            padding: 8px 15px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        .point-controls {
+            margin-top: 15px;
+        }
+        select, input {
+            padding: 5px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Spline Interpolation</h1>
+    <div class="controls">
+        <button id="clearBtn">Clear Canvas</button>
+        <button id="interpolateBtn">Toggle Interpolation</button>
+        <div class="point-controls" id="pointControls" style="display: none;">
+            <span>Select point:</span>
+            <select id="pointSelect"></select>
+            <span>Convexity:</span>
+            <input type="range" id="convexitySlider" min="-1" max="1" step="0.1" value="0">
+            <span id="convexityValue">0</span>
+        </div>
+    </div>
+    <canvas id="drawingCanvas" width="800" height="500"></canvas>
+    <p>Click on the canvas to add points. Toggle interpolation to switch between broken line and spline.</p>
+
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const clearBtn = document.getElementById('clearBtn');
+        const interpolateBtn = document.getElementById('interpolateBtn');
+        const pointSelect = document.getElementById('pointSelect');
+        const convexitySlider = document.getElementById('convexitySlider');
+        const convexityValue = document.getElementById('convexityValue');
+        const pointControls = document.getElementById('pointControls');
+
+        let points = [];
+        let interpolate = false;
+        let selectedPointIndex = -1;
+        let convexities = [];
+
+        function init() {
+            canvas.addEventListener('click', handleCanvasClick);
+            clearBtn.addEventListener('click', clearCanvas);
+            interpolateBtn.addEventListener('click', toggleInterpolation);
+            convexitySlider.addEventListener('input', updateConvexity);
+            pointSelect.addEventListener('change', selectPoint);
+            
+            draw();
+        }
+
+        function handleCanvasClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            points.push({ x, y });
+            convexities.push(0);
+            
+            updatePointSelect();
+            draw();
+        }
+
+        function clearCanvas() {
+            points = [];
+            convexities = [];
+            selectedPointIndex = -1;
+            pointControls.style.display = 'none';
+            draw();
+        }
+
+        function toggleInterpolation() {
+            interpolate = !interpolate;
+            interpolateBtn.textContent = interpolate ? 'Show Broken Line' : 'Show Spline';
+            
+            if (points.length > 2 && interpolate) {
+                pointControls.style.display = 'block';
+            } else {
+                pointControls.style.display = 'none';
+            }
+            
+            draw();
+        }
+
+        function updatePointSelect() {
+            pointSelect.innerHTML = '';
+            
+            for (let i = 1; i < points.length; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `Segment ${i}`;
+                pointSelect.appendChild(option);
+            }
+            
+            if (points.length > 1) {
+                selectedPointIndex = 1;
+                pointSelect.value = '1';
+                convexitySlider.value = convexities[1];
+                convexityValue.textContent = convexities[1];
+            }
+        }
+
+        function selectPoint() {
+            selectedPointIndex = parseInt(pointSelect.value);
+            convexitySlider.value = convexities[selectedPointIndex];
+            convexityValue.textContent = convexities[selectedPointIndex];
+        }
+
+        function updateConvexity() {
+            if (selectedPointIndex >= 0) {
+                convexities[selectedPointIndex] = parseFloat(convexitySlider.value);
+                convexityValue.textContent = convexities[selectedPointIndex];
+                draw();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (points.length === 0) return;
+            
+            ctx.fillStyle = 'red';
+            points.forEach(point => {
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            if (points.length < 2) return;
+            
+            if (interpolate) {
+                drawSpline();
+            } else {
+                drawBrokenLine();
+            }
+        }
+
+        function drawBrokenLine() {
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            
+            ctx.stroke();
+        }
+
+        function drawSpline() {
+            if (points.length < 3) {
+                drawBrokenLine();
+                return;
+            }
+            
+            ctx.strokeStyle = 'green';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            
+            for (let i = 1; i < points.length - 1; i++) {
+                const prev = points[i - 1];
+                const curr = points[i];
+                const next = points[i + 1];
+                const convexity = convexities[i];
+                
+                const cp1x = prev.x + (curr.x - prev.x) * 0.5;
+                const cp1y = prev.y + (curr.y - prev.y) * 0.5;
+                
+                const cp2x = curr.x + (next.x - curr.x) * 0.5;
+                const cp2y = curr.y + (next.y - curr.y) * 0.5;
+                
+                const midX = (cp1x + cp2x) / 2;
+                const midY = (cp1y + cp2y) / 2;
+                
+                const adjustedCp1x = cp1x + (midX - cp1x) * convexity;
+                const adjustedCp1y = cp1y + (midY - cp1y) * convexity;
+                
+                const adjustedCp2x = cp2x + (midX - cp2x) * convexity;
+                const adjustedCp2y = cp2y + (midY - cp2y) * convexity;
+                
+                ctx.bezierCurveTo(
+                    adjustedCp1x, adjustedCp1y,
+                    adjustedCp2x, adjustedCp2y,
+                    next.x, next.y
+                );
+            }
+            
+            ctx.stroke();
+            
+            if (selectedPointIndex >= 1 && selectedPointIndex < points.length) {
+                const prev = points[selectedPointIndex - 1];
+                const curr = points[selectedPointIndex];
+                
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(prev.x, prev.y);
+                ctx.lineTo(curr.x, curr.y);
+                ctx.stroke();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

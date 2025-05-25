@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsharp Mask Image Processing</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .control-panel {
+            width: 100%;
+            max-width: 600px;
+            background: #333;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .slider-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input[type="range"] {
+            flex-grow: 1;
+            margin: 0 10px;
+        }
+
+        canvas {
+            border: 4px solid #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            margin: 10px;
+            background-color: #eee;
+        }
+
+        button {
+            padding: 8px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Unsharp Mask (USM) Image Enhancement</h1>
+
+    <div class="control-panel">
+        <input type="file" id="imageInput" accept="image/*" />
+
+        <div class="slider-container">
+            <div>
+                <label>intensity(Amount):</label>
+                <input type="range" id="amountSlider" min="0.1" max="5" step="0.1" value="1.5" />
+                <span id="amountValue">1.5</span>
+            </div>
+
+            <div>
+                <label>radius(Radius):</label>
+                <input type="range" id="radiusSlider" min="1" max="20" step="1" value="5" />
+                <span id="radiusValue">5</span>
+            </div>
+        </div>
+
+        <button id="processBtn">Apply sharpening</button>
+        <button id="resetBtn">Reset</button>
+    </div>
+
+    <div style="display: flex; gap: 20px;">
+        <canvas id="originalCanvas" title="Original image"></canvas>
+        <canvas id="processedCanvas" title="Processed image"></canvas>
+    </div>
+
+    <script>
+        
+        const amountSlider = document.getElementById('amountSlider');
+        const radiusSlider = document.getElementById('radiusSlider');
+        const amountValue = document.getElementById('amountValue');
+        const radiusValue = document.getElementById('radiusValue');
+
+        amountSlider.addEventListener('input', (e) => {
+            amountValue.textContent = e.target.value.toFixed(1);
+        });
+
+        radiusSlider.addEventListener('input', (e) => {
+            radiusValue.textContent = e.target.value;
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            amountSlider.value = 1.5;
+            amountValue.textContent = '1.5';
+            radiusSlider.value = 5;
+            radiusValue.textContent = '5';
+            clearCanvases();
+        });
+
+        function clearCanvases() {
+            const canvases = document.querySelectorAll('canvas');
+            canvases.forEach(canvas => {
+                canvas.width = 0;
+                canvas.height = 0;
+            });
+        }
+
+        document.getElementById('processBtn').addEventListener('click', () => {
+            const file = document.getElementById('imageInput').files[0];
+            if (!file) return alert('Please select an image file');
+
+            const amount = parseFloat(amountSlider.value);
+            const radius = parseInt(radiusSlider.value);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => processImage(img, amount, radius);
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function processImage(img, amount, radius) {
+            const origCanvas = document.getElementById('originalCanvas');
+            const procCanvas = document.getElementById('processedCanvas');
+
+            
+            origCanvas.width = img.width;
+            origCanvas.height = img.height;
+            procCanvas.width = img.width;
+            procCanvas.height = img.height;
+
+            
+            const origCtx = origCanvas.getContext('2d');
+            origCtx.drawImage(img, 0, 0);
+
+            
+            const imageData = origCtx.getImageData(0, 0, img.width, img.height);
+            const processedData = unsharpMasking(imageData, amount, radius);
+
+            
+            const procCtx = procCanvas.getContext('2d');
+            procCtx.putImageData(processedData, 0, 0);
+        }
+
+        function unsharpMasking(imageData, amount, radius) {
+            const { width, height, data } = imageData;
+            const blurredData = gaussianBlur(imageData, radius);
+            const processedData = new ImageData(width, height);
+
+            for (let i = 0; i < data.length; i += 4) {
+                
+                const rDiff = data[i] - blurredData.data[i];
+                const gDiff = data[i + 1] - blurredData.data[i + 1];
+                const bDiff = data[i + 2] - blurredData.data[i + 2];
+
+                
+                processedData.data[i] = clamp(data[i] + amount * rDiff);
+                processedData.data[i + 1] = clamp(data[i + 1] + amount * rDiff); 
+                processedData.data[i + 2] = clamp(data[i + 2] + amount * bDiff);
+                processedData.data[i + 3] = 255; 
+            }
+
+            return processedData;
+        }
+
+        function gaussianBlur(imageData, radius) {
+            const { width, height, data } = imageData;
+            const kernel = createGaussianKernel(radius);
+            const blurred = new ImageData(width, height);
+
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let r = 0, g = 0, b = 0;
+                    for (let i = -radius; i <= radius; i++) {
+                        const pos = (y * width + clamp(x + i, 0, width - 1)) * 4;
+                        r += data[pos] * kernel[i + radius];
+                        g += data[pos + 1] * kernel[i + radius];
+                        b += data[pos + 2] * kernel[i + radius];
+                    }
+                    const idx = (y * width + x) * 4;
+                    blurred.data[idx] = r;
+                    blurred.data[idx + 1] = g;
+                    blurred.data[idx + 2] = b;
+                }
+            }
+
+            
+            for (let x = 0; x < width; x++) {
+                for (let y = 0; y < height; y++) {
+                    let r = 0, g = 0, b = 0;
+                    for (let i = -radius; i <= radius; i++) {
+                        const pos = (clamp(y + i, 0, height - 1) * width + x) * 4;
+                        r += blurred.data[pos] * kernel[i + radius];
+                        g += blurred.data[pos + 1] * kernel[i + radius];
+                        b += blurred.data[pos + 2] * kernel[i + radius];
+                    }
+                    const idx = (y * width + x) * 4;
+                    blurred.data[idx] = r;
+                    blurred.data[idx + 1] = g;
+                    blurred.data[idx + 2] = b;
+                }
+            }
+
+            return blurred;
+        }
+
+        function createGaussianKernel(radius) {
+            const kernel = [];
+            const sigma = radius / 3; 
+            let sum = 0;
+            for (let i = -radius; i <= radius; i++) {
+                const g = Math.exp(-(i * i) / (2 * sigma * sigma)) / (Math.sqrt(2 * Math.PI) * sigma);
+                kernel.push(g);
+                sum += g;
+            }
+            return kernel.map(v => v / sum); 
+        }
+
+        function clamp(value, min = 0, max = 255) {
+            return Math.round(Math.max(min, Math.min(value, max)));
+        }
+    </script>
+</body>
+
+</html>
